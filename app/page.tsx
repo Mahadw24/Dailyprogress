@@ -1,5 +1,5 @@
+import { getProgressStorageInfo } from "@/lib/progress-storage-meta";
 import ProgressApp from "./components/ProgressApp";
-import { getProgressStorageInfo } from "@/lib/progress-store";
 
 export default function Home() {
   return <ProgressApp storage={getProgressStorageInfo()} />;

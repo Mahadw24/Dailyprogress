@@ -2,6 +2,8 @@ import { Redis } from "@upstash/redis";
 import { promises as fs } from "fs";
 import path from "path";
 
+import { hasUpstashRedis } from "./progress-storage-meta";
+
 export type DayLog = {
   date: string;
   gym: string;
@@ -23,42 +25,22 @@ export class PersistenceNotConfiguredError extends Error {
 }
 
 function getRedis(): Redis | null {
-  const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
-  if (!url || !token) return null;
-  return new Redis({ url, token });
+  if (!hasUpstashRedis()) return null;
+  return new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL!.trim(),
+    token: process.env.UPSTASH_REDIS_REST_TOKEN!.trim(),
+  });
 }
-
-export type ProgressStorageInfo =
-  | { mode: "local"; pathLabel: string }
-  | { mode: "custom"; pathLabel: string }
-  | { mode: "redis"; pathLabel: string }
-  | { mode: "unconfigured"; pathLabel: string };
 
 function dataFile(): string {
   if (process.env.PROGRESS_STORAGE_PATH) {
     return process.env.PROGRESS_STORAGE_PATH;
   }
-  return path.join(process.cwd(), "data", "progress.json");
-}
-
-export function getProgressStorageInfo(): ProgressStorageInfo {
-  if (getRedis()) {
-    return {
-      mode: "redis",
-      pathLabel: "Upstash Redis (persistent)",
-    };
-  }
-  if (process.env.PROGRESS_STORAGE_PATH) {
-    return { mode: "custom", pathLabel: process.env.PROGRESS_STORAGE_PATH };
-  }
-  if (process.env.VERCEL === "1") {
-    return {
-      mode: "unconfigured",
-      pathLabel: "Add Upstash Redis env vars (see banner)",
-    };
-  }
-  return { mode: "local", pathLabel: "data/progress.json" };
+  return path.join(
+    /* turbopackIgnore: true */ process.cwd(),
+    "data",
+    "progress.json"
+  );
 }
 
 function normalizeDay(raw: unknown): DayLog | null {

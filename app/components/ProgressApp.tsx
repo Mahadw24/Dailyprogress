@@ -13,7 +13,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { DayLog, ProgressStorageInfo } from "@/lib/progress-store";
+import type { DayLog } from "@/lib/progress-store";
+import type { ProgressStorageInfo } from "@/lib/progress-storage-meta";
 
 function toISODate(d: Date): string {
   const y = d.getFullYear();
