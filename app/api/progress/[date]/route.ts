@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { deleteDay, getDay } from "@/lib/progress-store";
+import {
+  deleteDay,
+  getDay,
+  PersistenceNotConfiguredError,
+} from "@/lib/progress-store";
 
 type Ctx = { params: Promise<{ date: string }> };
 
@@ -24,7 +28,13 @@ export async function DELETE(_request: Request, ctx: Ctx) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
     return new NextResponse(null, { status: 204 });
-  } catch {
+  } catch (e) {
+    if (e instanceof PersistenceNotConfiguredError) {
+      return NextResponse.json(
+        { error: e.message, code: e.code },
+        { status: 503 }
+      );
+    }
     return NextResponse.json({ error: "Failed to delete" }, { status: 500 });
   }
 }

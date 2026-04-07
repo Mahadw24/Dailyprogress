@@ -1,3 +1,4 @@
+import { Redis } from "@upstash/redis";
 import { promises as fs } from "fs";
 import path from "path";
 
@@ -8,34 +9,54 @@ export type DayLog = {
   updatedAt: string;
 };
 
+/** Same JSON as `data/progress.json`, stored in Upstash when env is set. */
+const REDIS_KEY = "dailyprogress:logs";
+
+export class PersistenceNotConfiguredError extends Error {
+  readonly code = "PERSISTENCE_NOT_CONFIGURED" as const;
+  constructor() {
+    super(
+      "This host cannot write files. Add UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN (free Upstash Redis) in Vercel → Settings → Environment Variables, then redeploy."
+    );
+    this.name = "PersistenceNotConfiguredError";
+  }
+}
+
+function getRedis(): Redis | null {
+  const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
+  if (!url || !token) return null;
+  return new Redis({ url, token });
+}
+
 export type ProgressStorageInfo =
   | { mode: "local"; pathLabel: string }
-  | { mode: "serverless"; pathLabel: string }
-  | { mode: "custom"; pathLabel: string };
-
-const TMP_FILE = path.join("/tmp", "daily-progress.json");
-
-let ephemeralOverride: string | null = null;
+  | { mode: "custom"; pathLabel: string }
+  | { mode: "redis"; pathLabel: string }
+  | { mode: "unconfigured"; pathLabel: string };
 
 function dataFile(): string {
   if (process.env.PROGRESS_STORAGE_PATH) {
     return process.env.PROGRESS_STORAGE_PATH;
   }
-  if (ephemeralOverride) {
-    return ephemeralOverride;
-  }
-  if (process.env.VERCEL === "1") {
-    return TMP_FILE;
-  }
   return path.join(process.cwd(), "data", "progress.json");
 }
 
 export function getProgressStorageInfo(): ProgressStorageInfo {
+  if (getRedis()) {
+    return {
+      mode: "redis",
+      pathLabel: "Upstash Redis (persistent)",
+    };
+  }
   if (process.env.PROGRESS_STORAGE_PATH) {
     return { mode: "custom", pathLabel: process.env.PROGRESS_STORAGE_PATH };
   }
   if (process.env.VERCEL === "1") {
-    return { mode: "serverless", pathLabel: "server /tmp (ephemeral)" };
+    return {
+      mode: "unconfigured",
+      pathLabel: "Add Upstash Redis env vars (see banner)",
+    };
   }
   return { mode: "local", pathLabel: "data/progress.json" };
 }
@@ -63,20 +84,7 @@ async function ensureFile(): Promise<void> {
   }
 }
 
-let writeChain: Promise<unknown> = Promise.resolve();
-
-function serialized<T>(fn: () => Promise<T>): Promise<T> {
-  const run = writeChain.then(() => fn());
-  writeChain = run.then(
-    () => undefined,
-    () => undefined
-  );
-  return run;
-}
-
-export async function readAllLogs(): Promise<DayLog[]> {
-  await ensureFile();
-  const raw = await fs.readFile(dataFile(), "utf-8");
+function parseLogsJson(raw: string): DayLog[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -91,26 +99,67 @@ export async function readAllLogs(): Promise<DayLog[]> {
   return days;
 }
 
-async function writeAll(days: DayLog[]): Promise<void> {
+let writeChain: Promise<unknown> = Promise.resolve();
+
+function serialized<T>(fn: () => Promise<T>): Promise<T> {
+  const run = writeChain.then(() => fn());
+  writeChain = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
+
+async function readAllLogsFile(): Promise<DayLog[]> {
   await ensureFile();
-  const file = dataFile();
+  const raw = await fs.readFile(dataFile(), "utf-8");
+  return parseLogsJson(raw);
+}
+
+async function writeAllFile(days: DayLog[]): Promise<void> {
+  await ensureFile();
   const payload = JSON.stringify(days, null, 2);
   try {
-    await fs.writeFile(file, payload, "utf-8");
+    await fs.writeFile(dataFile(), payload, "utf-8");
   } catch (e) {
     const err = e as NodeJS.ErrnoException;
-    const readOnly =
+    if (
       err.code === "EROFS" ||
       err.code === "EACCES" ||
-      err.code === "ENOTSUP";
-    if (readOnly && !process.env.PROGRESS_STORAGE_PATH && !ephemeralOverride) {
-      ephemeralOverride = TMP_FILE;
-      await ensureFile();
-      await fs.writeFile(dataFile(), payload, "utf-8");
-      return;
+      err.code === "ENOTSUP"
+    ) {
+      throw new PersistenceNotConfiguredError();
     }
     throw e;
   }
+}
+
+async function readAllLogsRedis(redis: Redis): Promise<DayLog[]> {
+  const raw = await redis.get<unknown>(REDIS_KEY);
+  if (raw == null || raw === "") return [];
+  const str = typeof raw === "string" ? raw : JSON.stringify(raw);
+  return parseLogsJson(str);
+}
+
+async function writeAllRedis(redis: Redis, days: DayLog[]): Promise<void> {
+  await redis.set(REDIS_KEY, JSON.stringify(days));
+}
+
+export async function readAllLogs(): Promise<DayLog[]> {
+  const redis = getRedis();
+  if (redis) {
+    return readAllLogsRedis(redis);
+  }
+  return readAllLogsFile();
+}
+
+async function writeAll(days: DayLog[]): Promise<void> {
+  const redis = getRedis();
+  if (redis) {
+    await writeAllRedis(redis, days);
+    return;
+  }
+  await writeAllFile(days);
 }
 
 export async function getDay(date: string): Promise<DayLog | null> {

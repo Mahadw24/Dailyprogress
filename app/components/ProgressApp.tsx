@@ -199,15 +199,22 @@ export default function ProgressApp({
             initial={{ opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
             className={`mb-3 inline-flex max-w-full flex-wrap items-center justify-center gap-2 rounded-full border px-3 py-1 text-xs font-medium shadow-sm ${
-              storage.mode === "serverless"
-                ? "border-amber-200 bg-amber-50 text-amber-900"
-                : "border-[var(--card-border)] bg-[var(--card)] text-[var(--muted)]"
+              storage.mode === "unconfigured"
+                ? "border-red-200 bg-red-50 text-red-900"
+                : storage.mode === "redis"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                  : "border-[var(--card-border)] bg-[var(--card)] text-[var(--muted)]"
             }`}
           >
             <Calendar className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
-            {storage.mode === "serverless" ? (
+            {storage.mode === "unconfigured" ? (
               <>
-                <span>Serverless:</span>
+                <span>Not saving:</span>
+                <span className="text-left">{storage.pathLabel}</span>
+              </>
+            ) : storage.mode === "redis" ? (
+              <>
+                <span>Persistent:</span>
                 <code className="font-mono text-zinc-900">{storage.pathLabel}</code>
               </>
             ) : (
@@ -226,9 +233,11 @@ export default function ProgressApp({
             Daily progress
           </motion.h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
-            {storage.mode === "serverless"
-              ? "Ephemeral on Vercel — for lasting logs, use a DB or self-host."
-              : "Gym on the left, learning on the right — one calm log per day."}
+            {storage.mode === "unconfigured"
+              ? "Vercel cannot write to your repo. Add UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN from upstash.com (free tier), redeploy, and logs will persist."
+              : storage.mode === "redis"
+                ? "Logs are stored as JSON in Upstash Redis — durable on Vercel."
+                : "Gym on the left, learning on the right — one calm log per day."}
           </p>
         </header>
 
@@ -388,6 +397,28 @@ export default function ProgressApp({
               ))}
             </div>
           </section>
+        )}
+
+        {(storage.mode === "redis" ||
+          storage.mode === "local" ||
+          storage.mode === "custom") && (
+          <p className="mt-8 text-center text-xs text-zinc-500">
+            {storage.mode === "redis" ? (
+              <>
+                Redis key{" "}
+                <code className="rounded bg-zinc-100 px-1 font-mono text-zinc-800">
+                  dailyprogress:logs
+                </code>
+              </>
+            ) : (
+              <>
+                File:{" "}
+                <code className="rounded bg-zinc-100 px-1 font-mono text-zinc-800">
+                  {storage.pathLabel}
+                </code>
+              </>
+            )}
+          </p>
         )}
 
         <AnimatePresence>

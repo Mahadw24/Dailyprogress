@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { readAllLogs, upsertDay } from "@/lib/progress-store";
+import {
+  PersistenceNotConfiguredError,
+  readAllLogs,
+  upsertDay,
+} from "@/lib/progress-store";
 
 export async function GET() {
   try {
@@ -30,6 +34,12 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(day);
   } catch (e) {
+    if (e instanceof PersistenceNotConfiguredError) {
+      return NextResponse.json(
+        { error: e.message, code: e.code },
+        { status: 503 }
+      );
+    }
     const message = e instanceof Error ? e.message : "Failed to save";
     const status = message === "Invalid date" ? 400 : 500;
     return NextResponse.json({ error: message }, { status });
